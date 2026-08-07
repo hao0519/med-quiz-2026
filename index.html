@@ -116,6 +116,21 @@ header p{font-size:13px;opacity:.92}
 .confirm-msg{font-size:15px;color:var(--text);text-align:center;line-height:1.6;margin-bottom:20px}
 .confirm-row{display:flex;gap:10px}
 .confirm-row .btn{flex:1;justify-content:center}
+  .q-grid{
+    display:grid;grid-template-columns:repeat(auto-fill,minmax(38px,1fr));gap:8px;background:#fff;
+    border-radius:12px;padding:12px;box-shadow:var(--shadow);max-height:260px;overflow-y:auto;
+  }
+  .q-grid .gel{
+    display:flex;align-items:center;justify-content:center;height:34px;border-radius:9px;
+    font-size:13px;font-weight:600;color:var(--text-light);background:var(--gray-light);cursor:pointer;user-select:none;transition:.12s;
+  }
+  .q-grid .gel:active{transform:scale(.93)}
+  .q-grid .gel.cur{background:var(--primary);color:#fff}
+  .q-grid .gel.done{background:var(--success-light);color:var(--success);border:1.5px solid var(--success)}
+  .q-grid .gel.essay{background:var(--warning-light);color:var(--warning)}
+  .q-grid .gel.cur.done{background:var(--primary);color:#fff;border:none}
+  .q-grid .legend{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:10px;font-size:12px;color:var(--gray)}
+  .q-grid .legend i{display:inline-block;width:16px;height:16px;border-radius:4px;vertical-align:-3px;margin-right:4px}
 </style>
 </head>
 <body>
@@ -185,6 +200,8 @@ header p{font-size:13px;opacity:.92}
   <div id="view-quiz" class="hidden">
     <div class="crumb"><span id="quiz-product-name"></span> · <span id="quiz-progress"></span></div>
     <div class="progress-bar"><div class="fill" id="quiz-progress-fill" style="width:10%"></div></div>
+    <button class="btn btn-ghost btn-block" id="btn-grid" style="margin-top:8px;font-size:13px">🧭 展开题目导航（可自由跳转）</button>
+    <div id="q-grid" class="q-grid hidden" style="margin-top:10px"></div>
     <div class="card">
       <div id="q-type-info"></div>
       <div class="q-stem" id="q-stem"></div>
@@ -23771,6 +23788,7 @@ function startExam(ex){
   document.getElementById('quiz-product-name').textContent = ex.name + '（考试）';
   document.getElementById('quiz-exam-badge') && (document.getElementById('quiz-exam-badge').textContent='考试');
   showView('view-quiz');
+  resetGridUI();
   renderQuestion();
 }
 
@@ -23835,6 +23853,7 @@ document.getElementById('btn-start').onclick = ()=>{
   curIdx = 0;
   document.getElementById('quiz-product-name').textContent = currentProduct.name;
   showView('view-quiz');
+  resetGridUI();
   renderQuestion();
 };
 
@@ -23880,6 +23899,51 @@ function checkFillFilled(){
   const inputs = document.querySelectorAll('.q-blank-input');
   return inputs.length ? Array.from(inputs).some(inp=>inp.value.trim().length>0) : true;
 }
+function resetGridUI(){
+  const grid = document.getElementById('q-grid');
+  const btn = document.getElementById('btn-grid');
+  if(grid && !grid.classList.contains('hidden')) grid.classList.add('hidden');
+  if(btn) btn.textContent = '🧭 展开题目导航（可自由跳转）';
+}
+
+function renderQGrid(){
+  const grid = document.getElementById('q-grid');
+  if(!grid) return;
+  const show = !grid.classList.contains('hidden');
+  if(!show) return;
+  const legend =
+    '<div class="legend">'+
+      '<span><i style="background:var(--gray-light);border:1px solid #e2e8f0"></i>未答/浏览</span>'+
+      '<span><i style="background:var(--success-light);border:1.5px solid var(--success)"></i>已答</span>'+
+      '<span><i style="background:var(--warning-light);border:1px solid var(--warning)"></i>问答/浏览题</span>'+
+      '<span><i style="background:var(--primary)"></i>当前位置</span>'+
+    '</div>';
+  let html = legend;
+  questions.forEach((g,i)=>{
+    const done = !!answers[i];
+    const cls = ['gel'];
+    if(i===curIdx) cls.push('cur');
+    if(done && (g.type==='essay'||g.type==='fill')) cls.push('essay');
+    else if(done) cls.push('done');
+    html += `<div class="${cls.join(' ')}" data-idx="${i}">${i+1}</div>`;
+  });
+  grid.innerHTML = html;
+  grid.querySelectorAll('.gel').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      curIdx = parseInt(el.getAttribute('data-idx'),10);
+      renderQuestion();
+    });
+  });
+}
+
+function toggleGrid(){
+  const grid = document.getElementById('q-grid');
+  const btn = document.getElementById('btn-grid');
+  const show = grid.classList.toggle('hidden');
+  btn.textContent = show ? '🧭 展开题目导航（可自由跳转）' : '🕳️ 收起题目导航';
+  renderQGrid();
+}
+
 function renderQuestion(){
   // 把右侧主按钮切到“前进”模式（启用+去下一题/完成）
   function toForwardBtn(){
@@ -24002,6 +24066,7 @@ function renderQuestion(){
     // 已答过的选择题恢复后需重新启用主按钮，否则“下一题”点击无反应
     if(isChoice(q)) toForwardBtn();
   }
+  renderQGrid();
 }
 
 function selectSingle(L){
@@ -24177,6 +24242,7 @@ function showResult(L, isRestoring){
 }
 
 document.getElementById('btn-prev').onclick = ()=>{ if(curIdx>0){curIdx--;renderQuestion();} };
+document.getElementById('btn-grid').onclick = toggleGrid;
 document.getElementById('btn-next').onclick = ()=>{
   if(curIdx<questions.length-1){curIdx++;renderQuestion();}
   else showFinalResult();
