@@ -82,6 +82,9 @@ header p{font-size:13px;opacity:.92}
 .pill{display:inline-block;padding:2px 9px;border-radius:6px;font-size:11px;font-weight:500;vertical-align:middle}
 .pill-blue{background:#e0e7ff;color:#3730a3}
 .pill-green{background:#c6f6d5;color:#22543d}
+.quiz-timer{display:inline-block;padding:2px 9px;border-radius:6px;font-size:11px;font-weight:700;vertical-align:middle;background:#fff5f5;color:#e53e3e;border:1.5px solid #fc8181;margin-left:6px}
+.quiz-timer.warn{animation:blink .6s step-end infinite}
+@keyframes blink{50%{opacity:.4}}
 /* ===== 搜索 ===== */
 .search-wrap{margin-bottom:14px}
 .search-box{display:flex;align-items:center;gap:10px;background:#fff;border-radius:14px;padding:6px 14px;box-shadow:var(--shadow);border:1.5px solid var(--gray-light);transition:.15s}
@@ -198,7 +201,7 @@ header p{font-size:13px;opacity:.92}
   </div>
 
   <div id="view-quiz" class="hidden">
-    <div class="crumb"><span id="quiz-product-name"></span> · <span id="quiz-progress"></span></div>
+    <div class="crumb"><span id="quiz-product-name"></span> · <span id="quiz-progress"></span> <span id="quiz-timer" class="quiz-timer hidden"></span></div>
     <div class="progress-bar"><div class="fill" id="quiz-progress-fill" style="width:10%"></div></div>
     <button class="btn btn-ghost btn-block" id="btn-grid" style="margin-top:8px;font-size:13px">🧭 展开题目导航（可自由跳转）</button>
     <div id="q-grid" class="q-grid hidden" style="margin-top:10px"></div>
@@ -23498,6 +23501,7 @@ const EXAMS = [
   {
     id: 1, icon: '🛡️', color: '#dd6b20',
     name: '合规与项目费用考试',
+    timeLimit: 15, // 限时分钟
     desc: '来源：合规与项目费用管理',
     products: ['合规与项目费用管理'],
     sections: [
@@ -23509,6 +23513,7 @@ const EXAMS = [
   {
     id: 2, icon: '💊', color: '#3182ce',
     name: '氟比洛芬×凯立通考试',
+    timeLimit: 20, // 限时分钟
     desc: '来源：氟比洛芬凝胶贴膏 + 凯立通',
     products: ['氟比洛芬凝胶贴膏（得百安/泽普思）', '凯立通（利马前列素片）'],
     sections: [
@@ -23522,6 +23527,7 @@ const EXAMS = [
   {
     id: 3, icon: '🏆', color: '#805ad5',
     name: '八产品综合考试',
+    timeLimit: 20, // 限时分钟
     desc: '来源：得舒平/氟比洛芬/凯立通/普坦宁/凯纷/利斯的明/罗替高汀/得百宁',
     products: ['得舒平（洛索洛芬钠凝胶贴膏）', '氟比洛芬凝胶贴膏（得百安/泽普思）', '凯立通（利马前列素片）', '普坦宁（美洛昔康注射液）', '凯纷（氟比洛芬酯注射液）', '利斯的明/苏乐达（阿尔茨海默病）', '罗替高汀贴片（帕金森病）', '得百宁（利多卡因凝胶贴膏）'],
     sections: [
@@ -23537,6 +23543,56 @@ const EXAMS = [
 let EXAM_MODE = false;        // 是否处于考试模式
 let examScores = [];          // 与 questions 平行，每题分值
 let examEntry = null;         // 当前考试配置对象
+let examTimer = null;         // 限时考试的倒计时定时器
+let examRemain = 0;           // 剩余秒数
+
+/* ====== 限时考试倒计时 ====== */
+function fmtExamTime(sec){
+  const m = Math.floor(sec/60);
+  const s = sec%60;
+  return String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');
+}
+function updateExamTimerUI(){
+  const el = document.getElementById('quiz-timer');
+  if(!el) return;
+  if(!EXAM_MODE || !examTimer){ return; }
+  el.textContent = '⏱ 剩余 '+fmtExamTime(examRemain);
+  el.classList.toggle('warn', examRemain<=60);
+}
+function startExamTimer(seconds){
+  clearExamTimer();
+  if(!seconds) return;
+  EXAM_MODE = true;
+  examRemain = seconds;
+  const el = document.getElementById('quiz-timer');
+  el.classList.remove('hidden');
+  el.textContent = '⏱ 剩余 '+fmtExamTime(examRemain);
+  examTimer = setInterval(()=>{
+    examRemain--;
+    if(examRemain<=0){
+      clearExamTimer();
+      examRemain=0;
+      updateExamTimerUI();
+      // 时间到，自动交卷
+      autoSubmitExam();
+      return;
+    }
+    updateExamTimerUI();
+  }, 1000);
+}
+function clearExamTimer(){
+  if(examTimer){ clearInterval(examTimer); examTimer=null; }
+  const el = document.getElementById('quiz-timer');
+  if(el){ el.classList.add('hidden'); }
+}
+function autoSubmitExam(){
+  const n = (examEntry?examEntry.name:'');
+  // 时间到，自动交卷（不可取消）
+  showConfirm(`⏰ 「${n}」考试时间已到，系统将自动交卷并统计成绩。`, ()=>{
+    clearExamTimer();
+    showFinalResult();
+  }, true);
+}
 
 const TYPE_TAG = { single:'单选题', multi:'多选题', judge:'判断题', fill:'填空题', essay:'问答题' };
 const PRODUCT_ICONS = ['💊','🩹','🧠','📋','⚕️','💉','🩺','🏥'];
@@ -23756,7 +23812,8 @@ function openExam(ex){
   // 先提示考试规则
   const lines = ex.sections.map(s=>`${TYPE_TAG[s.type]} ${s.count} 题 × ${s.score} 分`).join('，');
   const totalPt = ex.sections.reduce((a,s)=>a+s.score*s.count,0);
-  showConfirm(`即将开始「${ex.name}」\n${lines}\n满分 ${totalPt} 分，随机抽题。是否开始？`, ()=>startExam(ex));
+  const timeTxt = ex.timeLimit ? `，限时 ${ex.timeLimit} 分钟` : '';
+  showConfirm(`即将开始「${ex.name}」\n${lines}\n满分 ${totalPt} 分，随机抽题${timeTxt}。是否开始？`, ()=>startExam(ex));
 }
 
 function startExam(ex){
@@ -23789,6 +23846,9 @@ function startExam(ex){
   showView('view-quiz');
   resetGridUI();
   renderQuestion();
+  // 启动限时倒计时
+  clearExamTimer();
+  if(ex.timeLimit) startExamTimer(ex.timeLimit*60);
 }
 
 /* ====== 首页 ====== */
@@ -24248,18 +24308,27 @@ document.getElementById('btn-next').onclick = ()=>{
 };
 /* ====== 自定义确认弹窗（兼容微信/内嵌 webview，原生 confirm 可能被拦截） ====== */
 let _confirmCb = null;
-function showConfirm(msg, onOk){
+let _confirmNoCancel = false; // true 时“取消/遮罩点击”也视作确认
+function showConfirm(msg, onOk, noCancel){
   _confirmCb = onOk;
+  _confirmNoCancel = !!noCancel;
   document.getElementById('confirm-msg').textContent = msg;
   document.getElementById('confirm-mask').classList.add('on');
 }
-function hideConfirm(){ document.getElementById('confirm-mask').classList.remove('on'); _confirmCb = null; }
-document.getElementById('confirm-ok').onclick = ()=>{ const cb=_confirmCb; hideConfirm(); if(cb) cb(); };
-document.getElementById('confirm-cancel').onclick = ()=>hideConfirm();
-document.getElementById('confirm-mask').addEventListener('click', e=>{ if(e.target.id==='confirm-mask') hideConfirm(); });
+function hideConfirm(){ document.getElementById('confirm-mask').classList.remove('on'); _confirmCb = null; _confirmNoCancel=false; }
+function fireConfirm(){
+  const cb=_confirmCb; hideConfirm(); if(cb) cb();
+}
+document.getElementById('confirm-ok').onclick = ()=>fireConfirm();
+document.getElementById('confirm-cancel').onclick = ()=>{
+  if(_confirmNoCancel){ fireConfirm(); return; }
+  hideConfirm();
+};
+document.getElementById('confirm-mask').addEventListener('click', e=>{ if(e.target.id==='confirm-mask'){ if(_confirmNoCancel){ fireConfirm(); return; } hideConfirm(); } });
 
 document.getElementById('btn-exit').onclick = ()=>{
   showConfirm('确定退出？已答记录将不保存。', ()=>{
+    clearExamTimer();
     if(EXAM_MODE){ EXAM_MODE=false; examScores=[]; examEntry=null; }
     showView('view-home');
   });
@@ -24274,6 +24343,7 @@ function isCorrectForType(q, myAns){
 }
 
 function showFinalResult(){
+  clearExamTimer();
   if(EXAM_MODE){
     // 考试模式：按分值计分
     let earned = 0, maxTotal = 0, correctN = 0, wrongN = 0;
@@ -24334,6 +24404,7 @@ document.getElementById('btn-home').onclick = ()=>showView('view-home');
 document.getElementById('btn-retry').onclick = ()=>{ openProduct(currentProduct); document.getElementById('btn-start').click(); };
 // 考试结果页按钮
 function resetExamMode(){
+  clearExamTimer();
   EXAM_MODE = false; examScores = []; examEntry = null;
 }
 document.getElementById('er-home').onclick = ()=>{ resetExamMode(); showView('view-home'); };
